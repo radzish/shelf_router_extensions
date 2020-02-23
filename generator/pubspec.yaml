@@ -1,0 +1,30 @@
+name: shelf_router_generator
+description: A starting point for Dart libraries or applications.
+# version: 1.0.0
+# homepage: https://www.example.com
+
+environment:
+  sdk: '>=2.7.0 <3.0.0'
+
+dependencies:
+  build: ^1.0.0
+  build_config: '>= 0.3.1 <= 0.5.0'
+  source_gen: ^0.9.1
+  analyzer:  '>=0.35.0 < 0.40.0'
+  shelf_router: ^0.7.0
+  code_builder: ^3.2.0
+  built_value: 7.0.0
+  built_collection: 4.3.0
+  shelf: ^0.7.3
+  meta: ^1.1.7
+  http_methods: ^1.0.0
+  shelf_router_extensions:
+    path: ../extensions
+
+dev_dependencies:
+  test: ^1.5.3
+  http: ^0.12.0+1
+  build_verify: ^1.1.1
+  build_runner: ^1.4.0
+  built_value_generator: 7.0.0
+  pedantic: ^1.4.0
