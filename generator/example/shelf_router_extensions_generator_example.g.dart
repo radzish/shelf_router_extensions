@@ -11,25 +11,35 @@ Router _$ResourceRouter(Resource service) {
   router.add(
       'GET',
       r'/test-route/<sParam>/<iParam>',
-      (Request request, String sParam, String iParam) => sreInterceptor(
-          () async => createListResponse<String>(
-              await service.testGet(
-                  request,
-                  sParam,
-                  parseIntParam('iParam', iParam),
-                  parseStringParam(
-                      'query', resolveQueryParam(request, 'query'), true),
-                  parseIntParam(
-                      'reqnum', resolveQueryParam(request, 'reqnum'), true),
-                  parseIntParam(
-                      'num', resolveQueryParam(request, 'num'), false),
-                  parseIntParam(
-                      'noname', resolveQueryParam(request, 'noname'), true),
-                  parseListParam<int>('multiple', request,
-                      (val) => parseIntParam('multiple', val), true),
-                  parseListParam<String>('multipleStrings', request,
-                      (val) => parseStringParam('multipleStrings', val), true)),
-              (value) =>
-                  serializeBuiltValue(service.builtSerializers, value))));
+      (Request request, String sParam, String iParam) =>
+          sreInterceptor(() async {
+            final serDe = service.serDe;
+            return createResponse<NewsItem<Generic>>(
+                await service.testGet(
+                    request,
+                    parsePathParam(
+                        'iParam', iParam, (val) => decodeData<int>(val, serDe)),
+                    parsePathParam('sParam', sParam,
+                        (val) => decodeData<String>(val, serDe)),
+                    parseSingleQueryParam('query', request,
+                        (val) => decodeData<String>(val, serDe), true),
+                    parseSingleQueryParam('reqnum', request,
+                        (val) => decodeData<int>(val, serDe), true),
+                    parseSingleQueryParam('num', request,
+                        (val) => decodeData<int>(val, serDe), false),
+                    parseSingleQueryParam('noname', request,
+                        (val) => decodeData<int>(val, serDe), true),
+                    parseMultiQueryParam('multiple', request,
+                        (val) => decodeData<int>(val, serDe), true),
+                    parseMultiQueryParam('multipleStrings', request,
+                        (val) => decodeData<String>(val, serDe), true),
+                    await parseSingleBodyParam<NewsItem<Generic>>(
+                        'bodyParam',
+                        request,
+                        (dynamic val) =>
+                            serDe.deserialize<NewsItem<Generic>>(val),
+                        false)),
+                serDe);
+          }));
   return router;
 }

@@ -8,8 +8,6 @@ environment:
 
 dependencies:
   shelf: ^0.7.3
-  built_value: 7.0.0
-  built_collection: 4.3.0
 
 dev_dependencies:
   pedantic: ^1.8.0
