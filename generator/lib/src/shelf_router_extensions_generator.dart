@@ -18,6 +18,7 @@ import 'package:analyzer/dart/element/element.dart' show ClassElement, ElementKi
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType, InterfaceType, ParameterizedType;
 import 'package:build/build.dart' show BuildStep, log;
+import 'package:built_collection/built_collection.dart';
 import 'package:code_builder/code_builder.dart' as code;
 import 'package:code_builder/code_builder.dart';
 import 'package:http_methods/http_methods.dart' show isHttpMethod;
@@ -30,14 +31,17 @@ import 'package:source_gen/source_gen.dart' as g;
 
 //TODO: make sure that only resources marked with ShelfExtendedResource are handled
 
-final _queryParamChecker = g.TypeChecker.fromRuntime(QueryParam);
+final _paramChecker = g.TypeChecker.fromRuntime(Param);
 final _listTypeChecker = g.TypeChecker.fromRuntime(List);
+final _serDeProviderChecker = g.TypeChecker.fromRuntime(SerDeProvider);
+
+final RegExp _routeParser = RegExp(r'([^<]*)(?:<([^>|]+)(?:\|([^>]*))?>)?');
 
 // Type checkers that we need later
 final _routeType = g.TypeChecker.fromRuntime(shelf_router.Route);
 final _routerType = g.TypeChecker.fromRuntime(shelf_router.Router);
 final _responseType = g.TypeChecker.fromRuntime(shelf.Response);
-final _requestType = g.TypeChecker.fromRuntime(shelf.Request);
+final _requestTypeChecker = g.TypeChecker.fromRuntime(shelf.Request);
 
 /// A representation of a handler that was annotated with [Route].
 class _Handler {
@@ -74,6 +78,7 @@ code.Method _buildRouterMethod({
           (b) => b
             ..addExpression(code.refer('Router').newInstance([]).assignFinal('router'))
             ..statements.addAll(handlers.map((h) => _buildAddHandlerCode(
+                  classElement: classElement,
                   router: code.refer('router'),
                   service: code.refer('service'),
                   handler: h,
@@ -84,6 +89,7 @@ code.Method _buildRouterMethod({
 
 /// Generate the code statement that adds [handler] from [service] to [router].
 code.Code _buildAddHandlerCode({
+  @required ClassElement classElement,
   @required code.Reference router,
   @required code.Reference service,
   @required _Handler handler,
@@ -100,30 +106,53 @@ code.Code _buildAddHandlerCode({
         service.property(handler.element.name),
       ]).statement;
     default:
+      final pathParamNames = _resolvePathParamNames(handler.route);
       return router.property('add').call([
         code.literalString(handler.verb.toUpperCase()),
         code.literalString(handler.route, raw: true),
         Method(
           (b) => b
-            ..requiredParameters.addAll(_handlerParameterNames(handler))
+            ..requiredParameters.addAll(_handlerParameterNames(pathParamNames))
             ..body = code.refer('sreInterceptor').call([
               Method(
                 (b) {
-                  final returnTypeInfo = resolveReturnTypeInfo(handler.element.returnType);
                   return b
                     ..modifier = code.MethodModifier.async
-                    ..body = code.refer(returnTypeInfo.name).call(
-                      [
-                        service.property(handler.element.name).call(_buildParameters(handler)).awaited,
-                        ...returnTypeInfo.arguments,
-                      ],
-                    ).code;
+                    ..body = code.Block((b) => b
+                      ..addExpression(_createSerDe(classElement))
+                      ..addExpression(
+                        code.refer("createResponse<${resolveReturnType(handler)}>").call([
+                          service.property(handler.element.name).call(_buildParameters(handler)).awaited,
+                          code.refer("serDe"),
+                        ]).returned,
+                      ));
                 },
               ).closure
             ]).code,
         ).closure
       ]).statement;
   }
+}
+
+List<String> _resolvePathParamNames(String route) {
+  List<String> result = [];
+
+  final it = _routeParser.allMatches(route).iterator;
+  while (it.moveNext()) {
+    final currentMatch = it.current;
+    final paramName = currentMatch.group(2);
+    if (paramName == null) {
+      break;
+    }
+    result.add(paramName);
+  }
+
+  return result;
+}
+
+code.Expression _createSerDe(ClassElement classElement) {
+  bool isSerDeProvider = _serDeProviderChecker.isAssignableFrom(classElement);
+  return code.refer(isSerDeProvider ? "service.serDe" : "standardSerDe").assignFinal("serDe");
 }
 
 class ReturnTypeInfo {
@@ -133,168 +162,111 @@ class ReturnTypeInfo {
   ReturnTypeInfo(this.name, {this.arguments = const []});
 }
 
-ReturnTypeInfo resolveReturnTypeInfo(DartType returnType) {
+DartType resolveReturnType(_Handler handler) {
   // return type must be future
-  final futureType = returnType as InterfaceType;
-  final type = futureType.typeArguments.first;
-
-  if (_responseType.isExactlyType(type)) {
-    return ReturnTypeInfo('createResponseResponse');
-  }
-
-  if (_isBuiltValue(type)) {
-    //TODO: change implementation to mixin or interface, which must provide builtSerializers method
-    return ReturnTypeInfo(
-      'createItemResponse<${type.displayName}>',
-      arguments: [
-        Method((b) => b
-          ..requiredParameters.add(code.Parameter((p) => p..name = 'value'))
-          ..body = code.refer('serializeBuiltValue').call(
-            [
-              code.refer('service.builtSerializers'),
-              code.refer('value'),
-            ],
-          ).code).closure,
-      ],
-    );
-  }
-
-  if (_listTypeChecker.isAssignableFromType(type)) {
-    final iterableGenerics = (type as InterfaceType).typeArguments;
-    final iterableGenericType = iterableGenerics.first;
-    final iterableGenericName = iterableGenericType.isDynamic ? "String" : iterableGenericType.displayName;
-
-    return ReturnTypeInfo(
-      'createListResponse<${iterableGenericName}>',
-      arguments: [
-        Method((b) => b
-          ..requiredParameters.add(code.Parameter((p) => p..name = 'value'))
-          ..body = code.refer('serializeBuiltValue').call(
-            [
-              code.refer('service.builtSerializers'),
-              code.refer('value'),
-            ],
-          ).code).closure,
-      ],
-    );
-  }
-
-  throw "Unsupported return type ${type.displayName}";
+  final futureType = handler.element.returnType as InterfaceType;
+  return futureType.typeArguments.first;
 }
 
-bool _isBuiltValue(DartType type) {
-  if (type.element is! ClassElement) return false;
-  return (type.element as ClassElement).allSupertypes.any((interfaceType) => interfaceType.name == 'Built');
-}
-
-List<Parameter> _handlerParameterNames(_Handler handler) {
-  //TODO change type checking against Request to typeChecker
-  return handler.element.parameters
-      .where((p) => !_isQueryParam(p))
-      .map((p) => code.Parameter((b) => b
-        ..name = p.name
-        ..type = code.refer(p.type.element.displayName == 'Request' ? p.type.element.displayName : 'String')))
-      .toList();
-}
-
-bool _isQueryParam(ParameterElement p) {
-  return _queryParamChecker.hasAnnotationOfExact(p);
+List<Parameter> _handlerParameterNames(List<String> paramNames) {
+  return [
+    code.Parameter((b) => b
+      ..type = code.refer("Request")
+      ..name = "request"),
+    for (final paramName in paramNames)
+      code.Parameter((b) => b
+        ..type = code.refer("String")
+        ..name = paramName),
+  ];
 }
 
 List<code.Expression> _buildParameters(_Handler handler) {
   return handler.element.parameters.map(_convertParameter).toList();
 }
 
-code.Expression _convertParameter(ParameterElement parameter) {
-  if (_isQueryParam(parameter)) {
-    return _convertQueryParam(parameter);
-  } else {
-    return _convertPathParam(parameter);
+code.Expression _convertParameter(ParameterElement param) {
+  if (_isRequestParam(param)) {
+    return code.refer("request");
+  }
+
+  final paramMeta = param.metadata.firstWhere(
+    (meta) =>
+        meta.element is ConstructorElement &&
+        _paramChecker.isExactlyType((meta.element as ConstructorElement).returnType),
+  );
+
+  final constructorName = (paramMeta.element as ConstructorElement).name;
+
+  final constructorConstant = param.metadata.first.computeConstantValue();
+  final required = constructorConstant.getField("required").toBoolValue();
+  final name = constructorConstant.getField("name").toStringValue();
+
+  switch (constructorName) {
+    case "path":
+      return _buildPathParam(name, param.name, required, param.type);
+    case "query":
+      return _buildQueryParam(name, param.name, required, param.type);
+    case "body":
+      return _buildBodyParam(name, param.name, required, param.type);
+    default:
+      throw "unsuported Param: $constructorName";
   }
 }
 
-code.Expression _convertQueryParam(ParameterElement parameter) {
-  final queryParamAnnotation = _queryParamChecker.firstAnnotationOf(parameter);
-  final queryParamName = queryParamAnnotation.getField('name').toStringValue() ?? parameter.name;
-  final required = queryParamAnnotation.getField('required').toBoolValue();
-
-  var primitiveParseFunction = _resolvePrimitiveParam(parameter.type);
-
-  // primitive
-  if (primitiveParseFunction != null) {
-    return code.refer(primitiveParseFunction).call(
-      [
-        code.literalString(queryParamName),
-        _wrapWithRequestParamResolve(queryParamName),
-        code.literalBool(required),
-      ],
-    );
-  }
-
-  // list
-  if (_listTypeChecker.isAssignableFromType(parameter.type)) {
-//    parseIterableParam<int>('multiple', request, (val) => parseIntParam('multiple', val), true),
-
-    final iterableGenerics = (parameter.type as InterfaceType).typeArguments;
-    final iterableGenericType = iterableGenerics.first;
-    final iterableGenericName = iterableGenericType.isDynamic ? "String" : iterableGenericType.displayName;
-    primitiveParseFunction =
-        iterableGenericType.isDynamic ? "parseStringParam" : _resolvePrimitiveParam(iterableGenericType);
-
-    return code.refer('parseListParam<$iterableGenericName>').call(
-      [
-        code.literalString(queryParamName),
-        code.refer('request'),
-        Method((b) => b
-          ..requiredParameters.add(code.Parameter((b) => b..name = 'val'))
-          ..body = code.refer(primitiveParseFunction).call(
-            [
-              code.literalString(queryParamName),
-              code.refer('val'),
-            ],
-          ).code).closure,
-        code.literalBool(required),
-      ],
-    );
-  }
-
-  throw 'Unsupported type ${parameter.type} of parameter ${parameter.name}';
-}
-
-String _resolvePrimitiveParam(DartType parameterType) {
-  if (parameterType.isDartCoreString) {
-    return 'parseStringParam';
-  } else if (parameterType.isDartCoreInt) {
-    return 'parseIntParam';
-  } else if (parameterType.isDartCoreDouble) {
-    return 'parseDoubleParam';
-  } else if (parameterType.isDartCoreNum) {
-    return 'parseNumParam';
-  }
-  return null;
-}
-
-code.Expression _wrapWithRequestParamResolve(String queryParamName) {
-  return code.refer('resolveQueryParam').call([
-    code.refer('request'),
-    code.literalString(queryParamName),
+code.Expression _buildPathParam(String name, String paramName, bool required, DartType type) {
+  return code.refer("parsePathParam").call([
+    code.literalString(name ?? paramName),
+    code.refer(name ?? paramName),
+    code.Method((b) => b
+      ..requiredParameters = ListBuilder(<Parameter>[code.Parameter((b) => b..name = "val")])
+      ..body = code.refer("decodeData<${type.name}>").call([code.refer("val"), code.refer("serDe")]).code).closure,
   ]);
 }
 
-code.Expression _convertPathParam(ParameterElement parameter) {
-  if (parameter.type.element.displayName == 'Request') {
-    return code.refer(parameter.name);
+code.Expression _buildQueryParam(String name, String paramName, bool required, DartType type) {
+  final isList = _listTypeChecker.isAssignableFromType(type);
+  final listGenerics = (type as InterfaceType).typeArguments;
+  final resolvedType = isList ? listGenerics.first : type;
+
+  return code.refer(isList ? "parseMultiQueryParam" : "parseSingleQueryParam").call([
+    code.literalString(name ?? paramName),
+    code.refer("request"),
+    code.Method((b) => b
+          ..requiredParameters = ListBuilder(<Parameter>[code.Parameter((b) => b..name = "val")])
+          ..body = code.refer("decodeData<${resolvedType.name}>").call([code.refer("val"), code.refer("serDe")]).code)
+        .closure,
+    code.literalBool(required),
+  ]);
+}
+
+code.Expression _buildBodyParam(String name, String paramName, bool required, DartType type) {
+  final isList = _listTypeChecker.isAssignableFromType(type);
+  DartType resolvedType = type;
+  if (isList) {
+    final listGenerics = (type as InterfaceType).typeArguments;
+    resolvedType = listGenerics.first;
   }
 
-  if (parameter.type.isDartCoreString) {
-    return code.refer(parameter.name);
-  }
+  return code
+      .refer(isList
+          ? "parseListBodyParam<${resolvedType.displayName}>"
+          : "parseSingleBodyParam<${resolvedType.displayName}>")
+      .call([
+    code.literalString(name ?? paramName),
+    code.refer("request"),
+    code.Method((b) => b
+      ..requiredParameters = ListBuilder(<Parameter>[
+        code.Parameter((b) => b
+          ..type = code.TypeReference((b) => b..symbol = "dynamic")
+          ..name = "val")
+      ])
+      ..body = code.refer("serDe.deserialize<${resolvedType.displayName}>").call([code.refer("val")]).code).closure,
+    code.literalBool(required),
+  ]).awaited;
+}
 
-  if (parameter.type.isDartCoreInt) {
-    return code.refer('parseIntParam').call([code.literalString(parameter.name), code.refer(parameter.name)]);
-  }
-
-  throw 'Unsupported type ${parameter.type} of parameter ${parameter.name}';
+bool _isRequestParam(ParameterElement param) {
+  return _requestTypeChecker.isAssignableFromType(param.type);
 }
 
 class ShelfRouterExtensionsGenerator extends g.Generator {
@@ -403,7 +375,7 @@ void _typeCheckHandler(_Handler h) {
 //          element: p);
     }
   }
-  if (!_requestType.isExactlyType(h.element.parameters.first.type)) {
+  if (!_requestTypeChecker.isExactlyType(h.element.parameters.first.type)) {
     throw g.InvalidGenerationSourceError(
         'The shelf_router.Route annotation can only be used on shelf request '
         'handlers accept a shelf.Request parameter as first parameter',
@@ -420,14 +392,14 @@ void _typeCheckHandler(_Handler h) {
 //    }
     for (int i = 0; i < params.length; i++) {
       final p = h.element.parameters[i + 1];
-      if (p.name != params[i]) {
-        throw g.InvalidGenerationSourceError(
-            'The shelf_router.Route annotation can only be used on shelf '
-            'request handlers accept a shelf.Request parameter and/or a '
-            'shelf.Request parameter and all string parameters in the route, '
-            'the "${p.name}" parameter should be named "${params[i]}"',
-            element: p);
-      }
+//      if (p.name != params[i]) {
+//        throw g.InvalidGenerationSourceError(
+//            'The shelf_router.Route annotation can only be used on shelf '
+//            'request handlers accept a shelf.Request parameter and/or a '
+//            'shelf.Request parameter and all string parameters in the route, '
+//            'the "${p.name}" parameter should be named "${params[i]}"',
+//            element: p);
+//      }
       //TODO: add checks for supported types
 //      if (!_stringType.isExactlyType(p.type)) {
 //        throw g.InvalidGenerationSourceError(

@@ -1,9 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:built_collection/built_collection.dart';
-import 'package:built_value/built_value.dart';
-import 'package:built_value/serializer.dart';
 import 'package:shelf/shelf.dart';
 
 class ShelfExtendedResource {
@@ -28,12 +25,50 @@ class ParameterRequiredError {
   String get message => "parameter '$name' is required";
 }
 
-class QueryParam {
+abstract class SerDeProvider {
+  SerDe get serDe;
+}
+
+class Param {
   final String name;
   final bool required;
 
-  const QueryParam({this.name, this.required = true});
+  const Param._({this.name, this.required});
+
+  const Param.path({String name}) : this._(name: name, required: true);
+
+  const Param.query({String name, bool required = true}) : this._(name: name, required: required);
+
+  const Param.body({bool required = true}) : this._(required: required);
 }
+
+abstract class SerDe {
+  dynamic serialize<T>(T value);
+
+  T deserialize<T>(dynamic data);
+}
+
+class StandardSerDe implements SerDe {
+  @override
+  dynamic serialize<T>(T value) {
+    if (value is num || value is String || value is bool) {
+      return value;
+    }
+
+    throw "unsuported type: ${value.runtimeType}";
+  }
+
+  @override
+  T deserialize<T>(dynamic item) {
+    if (isType<T, num>() || T == String || T == bool) {
+      return item as T;
+    }
+
+    throw "unsupported type: ${T}";
+  }
+}
+
+StandardSerDe standardSerDe = StandardSerDe();
 
 Future<Response> sreInterceptor(Future<Response> Function() resourceMethod) async {
   try {
@@ -46,38 +81,7 @@ Future<Response> sreInterceptor(Future<Response> Function() resourceMethod) asyn
   }
 }
 
-String parseStringParam(String name, String value, [bool required = true]) {
-  return _parseParam(name, value, (val) => val, required);
-}
-
-int parseIntParam(String name, String value, [bool required = true]) {
-  return _parseParam(name, value, (val) => int.parse(val), required);
-}
-
-double parseDoubleParam(String name, String value, [bool required = true]) {
-  return _parseParam(name, value, (val) => double.parse(val), required);
-}
-
-num parseNumParam(String name, String value, [bool required = true]) {
-  return _parseParam(name, value, (val) => num.parse(val), required);
-}
-
-List<T> parseListParam<T>(String name, Request request, T Function(String) parser, bool required) {
-  final uri = request.requestedUri;
-  final queryParameters = uri.queryParametersAll[name];
-
-  if (required && queryParameters == null) {
-    throw ParameterRequiredError(name);
-  }
-
-  return queryParameters.map(parser).toList();
-}
-
-T _parseParam<T>(String name, String value, T Function(String) parser, bool required) {
-  if (required && value == null) {
-    throw ParameterRequiredError(name);
-  }
-
+T parsePathParam<T>(String name, String value, T Function(String) parser) {
   if (value == null) {
     return null;
   }
@@ -89,36 +93,85 @@ T _parseParam<T>(String name, String value, T Function(String) parser, bool requ
   }
 }
 
-String resolveQueryParam(Request request, String name) {
+T parseSingleQueryParam<T>(String name, Request request, T Function(String) parser, bool required) {
   final uri = request.requestedUri;
-  return uri.queryParameters[name];
+  final queryParameter = uri.queryParameters[name];
+
+  if (required && queryParameter == null) {
+    throw ParameterRequiredError(name);
+  }
+
+  return queryParameter != null ? parser(queryParameter) : null;
 }
 
-Response createResponseResponse(Response response) => response;
+List<T> parseMultiQueryParam<T>(String name, Request request, T Function(String) parser, bool required) {
+  final uri = request.requestedUri;
+  final queryParameters = uri.queryParametersAll[name];
 
-Response createItemResponse<T>(T item, dynamic Function(T) serializer) {
-  final json = serializer(item);
-  return Response.ok(jsonEncode(json));
+  if (required && queryParameters == null) {
+    throw ParameterRequiredError(name);
+  }
+
+  return queryParameters?.map(parser)?.toList();
 }
 
-Response createListResponse<T>(List<T> value, dynamic Function(T) serializer) {
-  final serializedObjects = value.map(serializer).toList();
-  return Response.ok(jsonEncode(serializedObjects));
+Future<List<T>> parseListBodyParam<T>(String name, Request request, T Function(dynamic) parser, bool required) async {
+  final value = await request.readAsString();
+  final decodedValues = jsonDecode(value);
+
+  if (!(decodedValues is List)) {
+    throw ParameterParsingError(name, value, "value is not List");
+  }
+
+  if (required && (decodedValues == null || decodedValues.isEmpty)) {
+    throw ParameterRequiredError(name);
+  }
+
+  return decodedValues?.map(parser)?.toList()?.toList();
 }
 
-dynamic serializeBuiltValue<T extends Built<T, B>, B extends Builder<T, B>>(
-  Serializers serializers,
-  Built<T, B> result,
-) {
-  return serializers.serialize(result, specifiedType: FullType(T));
+Future<T> parseSingleBodyParam<T>(String name, Request request, T Function(dynamic) parser, bool required) async {
+  final value = await request.readAsString();
+
+  if (required && (value == null || value.isEmpty)) {
+    throw ParameterRequiredError(name);
+  }
+
+  final decodedValue = jsonDecode(value);
+
+  try {
+    return parser(decodedValue);
+  } on FormatException catch (e) {
+    throw ParameterParsingError(name, value, e.message);
+  }
 }
 
-//Future<Response> serializeListOfBuiltValues<T extends Built<T, B>, B extends Builder<T, B>>(
-//  Serializers serializers,
-//  Future<List<Built<T, B>>> result,
-//) async {
-//  final responseObjects = await result;
-//  final serializedObjects =
-//      responseObjects.map((responseObject) => serializers.serialize(responseObject, specifiedType: FullType(T))).toList();
-//  return Response.ok(jsonEncode(serializedObjects));
-//}
+Response createResponse<T>(T data, SerDe serDe) {
+  if (data is Response) {
+    return data;
+  }
+
+  final result = jsonEncode(
+      isType<T, List>() ? (data as List).map((item) => serDe.serialize(item)).toList() : serDe.serialize(data));
+
+  return Response.ok(result);
+}
+
+String encodeData<T>(T data, SerDe serDe) {
+  dynamic result = serDe.serialize<T>(data);
+  return jsonEncode(result);
+}
+
+T decodeData<T>(String data, SerDe serDe) {
+  dynamic json;
+  try {
+    json = jsonDecode(data);
+  } catch (e) {
+    json = data;
+  }
+  return serDe.deserialize(json);
+}
+
+bool isType<A, B>() {
+  return <A>[] is List<B>;
+}

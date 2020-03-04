@@ -10,11 +10,15 @@ part 'serializers.g.dart';
 @SerializersFor(
   [
     NewsItem,
+    Generic,
+    MediaType,
   ],
 )
 final Serializers serializers = (_$serializers.toBuilder()
       ..addPlugin(StandardJsonPlugin())
       ..add(Iso8601DateTimeSerializer())
+      ..addBuilderFactory(FullType(NewsItem, [FullType(Generic)]), () => NewsItemBuilder<Generic>())
+      ..addBuilderFactory(FullType(NewsItem, [FullType(String)]), () => NewsItemBuilder<String>())
     //
     )
     .build();

@@ -1,0 +1,140 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:built_value/serializer.dart';
+import 'package:http/http.dart' as http;
+import 'package:shelf/shelf.dart';
+import 'package:shelf/shelf_io.dart';
+import 'package:shelf_router/shelf_router.dart';
+import 'package:shelf_router_extensions/shelf_router_extensions.dart';
+
+import 'model.dart';
+import 'serializers.dart';
+
+class Resource {
+  @Route.post('/test-route/<sParam>/<iParam>')
+  Future<List<NewsItem<Generic>>> testGet(
+    Request request,
+    @Param.path() String sParam,
+    @Param.path() int iParam,
+    @Param.query() int singleValue,
+    @Param.query() List<int> mulValue,
+    @Param.query() List<MediaType> mulEnum,
+//    @Param.body() NewsItem<Generic> newsItem,
+    @Param.body() NewsItem<String> newsItem,
+  ) async {
+    print('hi $sParam $iParam $singleValue $mulValue $mulEnum $newsItem');
+
+    return [
+      NewsItem<Generic>(
+        (b) => b
+          ..id = 0
+          ..title = "title0"
+          ..category = Generic((b) => b..value = "kaka0"),
+      ),
+      NewsItem<Generic>(
+        (b) => b
+          ..id = 1
+          ..title = "title1"
+          ..category = Generic((b) => b..value = "kaka1"),
+      ),
+    ];
+  }
+
+  //TODO: singleton!!!
+  SerDe get serDe => BuiltValueSerDe();
+
+  Handler get handler => _$ResourceRouter(this).handler;
+}
+
+Router _$ResourceRouter(Resource service) {
+  final router = Router();
+  router.add(
+    'POST',
+    r'/test-route/<sParam>/<iParam>',
+    (Request request, String sParam, String iParam) => sreInterceptor(
+      () async {
+        SerDe serDe = service.serDe ?? standardSerDe;
+        return createResponse<List<NewsItem<Generic>>>(
+          await service.testGet(
+            request,
+            parsePathParam("sParam", sParam, (val) => decodeData<String>(val, serDe)),
+            parsePathParam("iParam", iParam, (val) => decodeData<int>(val, serDe)),
+            parseSingleQueryParam<int>("singleValue", request, (val) => decodeData<int>(val, serDe), false),
+            parseMultiQueryParam<int>("mulValue", request, (val) => decodeData<int>(val, serDe), false),
+            parseMultiQueryParam<MediaType>("mulEnum", request, (val) => decodeData<MediaType>(val, serDe), false),
+//            await parseBodyParam("newsItem", request, (val) => decodeData<NewsItem<Generic>>(val, serDe), false),
+            await parseBodyParam("newsItem", request, (val) => decodeData<NewsItem<String>>(val, serDe), false),
+          ),
+          serDe,
+        );
+      },
+    ),
+  );
+  return router;
+}
+
+class BuiltValueSerDe extends StandardSerDe {
+  dynamic serialize<T>(T item) {
+    if (item is NewsItem<Generic>) {
+      return serializers.serialize(item, specifiedType: FullType(NewsItem, [FullType(Generic)]));
+    }
+    if (item is NewsItem<String>) {
+      return serializers.serialize(item, specifiedType: FullType(NewsItem, [FullType(String)]));
+    }
+    if (item is MediaType) {
+      return serializers.serialize(item, specifiedType: FullType(MediaType));
+    }
+
+    return super.serialize(item);
+  }
+
+  T deserialize<T>(dynamic data) {
+    if (isType<T, NewsItem<Generic>>()) {
+      return serializers.deserialize(data, specifiedType: FullType(NewsItem, [FullType(Generic)])) as T;
+    }
+
+    if (isType<T, NewsItem<String>>()) {
+      return serializers.deserialize(data, specifiedType: FullType(NewsItem, [FullType(String)])) as T;
+    }
+
+    if (T == MediaType) {
+      return serializers.deserialize(data, specifiedType: FullType(MediaType)) as T;
+    }
+
+    return super.deserialize(data);
+  }
+}
+
+void main() async {
+  final resource = Resource();
+
+  final handler = Pipeline().addMiddleware(apiContentTypeMiddleware).addHandler(resource.handler);
+
+  final server = await serve(handler, 'localhost', 8080);
+  print('Server running on localhost:${server.port}');
+
+//  final dynamic data = jsonEncode({
+//    "id": 0,
+//    "title": "title0",
+//    "category": {"value": "kaka0"}
+//  });
+  final dynamic data = jsonEncode({
+    "id": 0,
+    "title": "title0",
+    "category": "kaka0"
+  });
+
+  http.Response res = await http.post(
+      "http://localhost:8080/test-route/aaa/100?singleValue=111&mulValue=10&mulValue=20&mulEnum=youtube&mulEnum=image",
+      body: data);
+  print("RESPONSE: ${res.body}");
+
+  exit(0);
+}
+
+Middleware apiContentTypeMiddleware = (handler) => (request) async {
+      Response response = await handler(request);
+      response = response?.change(headers: {"content-type": "application/json; charset=utf-8"});
+      return response;
+    };
