@@ -376,10 +376,10 @@ void _typeCheckHandler(_Handler h) {
     }
   }
   if (!_requestTypeChecker.isExactlyType(h.element.parameters.first.type)) {
-    throw g.InvalidGenerationSourceError(
-        'The shelf_router.Route annotation can only be used on shelf request '
-        'handlers accept a shelf.Request parameter as first parameter',
-        element: h.element);
+//    throw g.InvalidGenerationSourceError(
+//        'The shelf_router.Route annotation can only be used on shelf request '
+//        'handlers accept a shelf.Request parameter as first parameter',
+//        element: h.element);
   }
   if (h.element.parameters.length > 1) {
     //TODO: re-implement this check
