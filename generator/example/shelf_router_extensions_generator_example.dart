@@ -46,6 +46,11 @@ class Resource with BuiltValueSerDeProvider {
 //    ];
   }
 
+  @Route.get('/test-void')
+  Future<void> testVoid() {
+    print("test void");
+  }
+
 //  @Route.post('/test-udpate/<id>')
 //  Future<Response> testPost(
 //      Request request,
@@ -105,7 +110,7 @@ void main() async {
 
   final handler = Pipeline().addMiddleware(apiContentTypeMiddleware).addHandler(resource.handler);
 
-  final server = await serve(handler, 'localhost', 8080);
+  final server = await serve(handler, 'localhost', 8888);
   print('Server running on localhost:${server.port}');
 }
 

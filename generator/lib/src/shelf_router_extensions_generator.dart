@@ -296,14 +296,15 @@ class ShelfRouterExtensionsGenerator extends g.Generator {
     }
 
     // Run type check to ensure method and getters have the right signatures.
-    for (final handler in classes.values.expand((i) => i)) {
-      // If the verb is $mount, then it's not a handler, but a mount.
-      if (handler.verb.toLowerCase() == r'$mount') {
-        _typeCheckMount(handler);
-      } else {
-        _typeCheckHandler(handler);
-      }
-    }
+    //TODO: implement validation
+//    for (final handler in classes.values.expand((i) => i)) {
+//      // If the verb is $mount, then it's not a handler, but a mount.
+//      if (handler.verb.toLowerCase() == r'$mount') {
+//        _typeCheckMount(handler);
+//      } else {
+//        _typeCheckHandler(handler);
+//      }
+//    }
 
     // Build library and emit code with all generate methods.
     final methods = classes.entries.map((e) => _buildRouterMethod(
@@ -359,28 +360,28 @@ void _typeCheckHandler(_Handler h) {
 
   // Ensure that the first parameter is shelf.Request
   if (h.element.parameters.isEmpty) {
-    throw g.InvalidGenerationSourceError(
-        'The shelf_router.Route annotation can only be used on shelf request '
-        'handlers accept a shelf.Request parameter',
-        element: h.element);
+//    throw g.InvalidGenerationSourceError(
+//        'The shelf_router.Route annotation can only be used on shelf request '
+//        'handlers accept a shelf.Request parameter',
+//        element: h.element);
   }
-  for (final p in h.element.parameters) {
-    if (p.isOptional) {
-      //TODO: re-implement this check
+//  for (final p in h.element.parameters) {
+//    if (p.isOptional) {
+//      TODO: re-implement this check
 //      throw g.InvalidGenerationSourceError(
 //          'The shelf_router.Route annotation can only be used on shelf '
 //          'request handlers accept a shelf.Request parameter and/or a '
 //          'shelf.Request parameter and all string parameters in the route, '
 //          'optional parameters are not permitted',
 //          element: p);
-    }
-  }
-  if (!_requestTypeChecker.isExactlyType(h.element.parameters.first.type)) {
+//    }
+//  }
+//  if (!_requestTypeChecker.isExactlyType(h.element.parameters.first.type)) {
 //    throw g.InvalidGenerationSourceError(
 //        'The shelf_router.Route annotation can only be used on shelf request '
 //        'handlers accept a shelf.Request parameter as first parameter',
 //        element: h.element);
-  }
+//  }
   if (h.element.parameters.length > 1) {
     //TODO: re-implement this check
 //    if (h.element.parameters.length != params.length + 1) {

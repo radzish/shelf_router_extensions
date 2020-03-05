@@ -41,5 +41,12 @@ Router _$ResourceRouter(Resource service) {
                         false)),
                 serDe);
           }));
+  router.add(
+      'GET',
+      r'/test-void',
+      (Request request) => sreInterceptor(() async {
+            final serDe = service.serDe;
+            return createResponse<void>(await service.testVoid(), serDe);
+          }));
   return router;
 }
