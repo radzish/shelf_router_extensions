@@ -51,7 +51,7 @@ abstract class SerDe {
 class StandardSerDe implements SerDe {
   @override
   dynamic serialize<T>(T value) {
-    if (value is num || value is String || value is bool) {
+    if (value == null || value is num || value is String || value is bool) {
       return value;
     }
 
@@ -60,7 +60,7 @@ class StandardSerDe implements SerDe {
 
   @override
   T deserialize<T>(dynamic item) {
-    if (isType<T, num>() || T == String || T == bool) {
+    if (isType<T, num>() || T == String || T == bool || T == Null) {
       return item as T;
     }
 
