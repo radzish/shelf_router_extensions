@@ -25,6 +25,7 @@ class Resource with BuiltValueSerDeProvider {
 //    @Param.body(required: false) List<String> bodyParam,
 //    @Param.body(required: false) String bodyParam,
     @Param.body(required: false) NewsItem<Generic> bodyParam,
+//  @Param.body(required: false) int bodyParam,
   ) async {
     print(
         'hi $sParam $pathParamWithDifferentName $qsParam $reqQiParam $qiParam $noname $multiple $multipleStrings $bodyParam');
@@ -49,6 +50,11 @@ class Resource with BuiltValueSerDeProvider {
   @Route.get('/test-void')
   Future<void> testVoid() {
     print("test void");
+  }
+
+  @Route.get('/test')
+  Future<void> test(@Param.query() int aaa) {
+    print("test $aaa");
   }
 
 //  @Route.post('/test-udpate/<id>')

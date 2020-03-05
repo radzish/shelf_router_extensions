@@ -60,8 +60,27 @@ class StandardSerDe implements SerDe {
 
   @override
   T deserialize<T>(dynamic item) {
-    if (isType<T, num>() || T == String || T == bool || T == Null) {
+    if (item == null) {
+      return null;
+    }
+    if (T == String) {
       return item as T;
+    }
+    if (T == int) {
+      return int.parse(item) as T;
+    }
+    if (T == double) {
+      return double.parse(item) as T;
+    }
+    if (T == bool) {
+      final boolString = item.toString().toLowerCase();
+      if (boolString == "true") {
+        return true as T;
+      }
+      if (boolString == "false") {
+        return false as T;
+      }
+      throw "invalid bool value: $boolString";
     }
 
     throw "unsupported type: ${T}";
@@ -101,7 +120,11 @@ T parseSingleQueryParam<T>(String name, Request request, T Function(String) pars
     throw ParameterRequiredError(name);
   }
 
-  return queryParameter != null ? parser(queryParameter) : null;
+  try {
+    return queryParameter != null ? parser(queryParameter) : null;
+  } catch (e) {
+    throw ParameterParsingError(name, queryParameter, e.message);
+  }
 }
 
 List<T> parseMultiQueryParam<T>(String name, Request request, T Function(String) parser, bool required) {
@@ -112,7 +135,15 @@ List<T> parseMultiQueryParam<T>(String name, Request request, T Function(String)
     throw ParameterRequiredError(name);
   }
 
-  return queryParameters?.map(parser)?.toList();
+  return queryParameters?.map(
+    (param) {
+      try {
+        return parser(param);
+      } catch (e) {
+        throw ParameterParsingError(name, param, e.message);
+      }
+    },
+  )?.toList();
 }
 
 Future<List<T>> parseListBodyParam<T>(String name, Request request, T Function(dynamic) parser, bool required) async {
@@ -137,10 +168,14 @@ Future<T> parseSingleBodyParam<T>(String name, Request request, T Function(dynam
     throw ParameterRequiredError(name);
   }
 
-  final decodedValue = jsonDecode(value);
+  if (value == null || value.isEmpty) {
+    return null;
+  }
+
+  final decodedValue = _decodeJson(value);
 
   try {
-    return parser(decodedValue);
+    return decodedValue != null ? parser(decodedValue) : null;
   } on FormatException catch (e) {
     throw ParameterParsingError(name, value, e.message);
   }
@@ -163,13 +198,23 @@ String encodeData<T>(T data, SerDe serDe) {
 }
 
 T decodeData<T>(String data, SerDe serDe) {
+  final json = _decodeJson(data);
+  return serDe.deserialize(json);
+}
+
+dynamic _decodeJson(String data) {
   dynamic json;
   try {
     json = jsonDecode(data);
+    // we are interested in json objects and arrays only.
+    // all other types should be in pure string and parsed by deserializer
+    if (!(json is Map) && !(json is List)) {
+      json = data;
+    }
   } catch (e) {
     json = data;
   }
-  return serDe.deserialize(json);
+  return json;
 }
 
 bool isType<A, B>() {

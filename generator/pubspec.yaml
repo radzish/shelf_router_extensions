@@ -30,3 +30,7 @@ dev_dependencies:
   build_runner: ^1.4.0
   built_value_generator: 7.0.0
   pedantic: ^1.4.0
+
+dependency_overrides:
+  shelf_router_extensions:
+    path: ../extensions
