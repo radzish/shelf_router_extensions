@@ -186,8 +186,18 @@ Response createResponse<T>(T data, SerDe serDe) {
     return data;
   }
 
-  final result = jsonEncode(
-      isType<T, List>() ? (data as List).map((item) => serDe.serialize(item)).toList() : serDe.serialize(data));
+  final value =
+      isType<T, List>() ? (data as List).map((item) => serDe.serialize(item)).toList() : serDe.serialize(data);
+
+  var result;
+
+  if (value != null) {
+    if (value is List || value is Map) {
+      result = jsonEncode(value);
+    } else {
+      result = value.toString();
+    }
+  }
 
   return Response.ok(result);
 }

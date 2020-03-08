@@ -48,13 +48,13 @@ class Resource with BuiltValueSerDeProvider {
   }
 
   @Route.get('/test-void')
-  Future<void> testVoid() {
+  Future<void> testVoid() async {
     print("test void");
   }
 
   @Route.get('/test')
-  Future<void> test(@Param.query() int aaa) {
-    print("test $aaa");
+  Future<int> test() async {
+    return 100500;
   }
 
 //  @Route.post('/test-udpate/<id>')
