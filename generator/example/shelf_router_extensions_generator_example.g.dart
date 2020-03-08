@@ -53,10 +53,7 @@ Router _$ResourceRouter(Resource service) {
       r'/test',
       (Request request) => sreInterceptor(() async {
             final serDe = service.serDe;
-            return createResponse<void>(
-                await service.test(parseSingleQueryParam('aaa', request,
-                    (val) => decodeData<int>(val, serDe), true)),
-                serDe);
+            return createResponse<int>(await service.test(), serDe);
           }));
   return router;
 }
