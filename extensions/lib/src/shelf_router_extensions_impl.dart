@@ -67,7 +67,10 @@ class StandardSerDe implements SerDe {
       return item as T;
     }
     if (T == int) {
-      return int.parse(item) as T;
+      if (item is String) {
+        return int.parse(item) as T;
+      }
+      return item as T;
     }
     if (T == double) {
       return double.parse(item) as T;
@@ -158,7 +161,7 @@ Future<List<T>> parseListBodyParam<T>(String name, Request request, T Function(d
     throw ParameterRequiredError(name);
   }
 
-  return decodedValues?.map(parser)?.toList()?.toList();
+  return decodedValues?.map(parser)?.cast<T>()?.toList();
 }
 
 Future<T> parseSingleBodyParam<T>(String name, Request request, T Function(dynamic) parser, bool required) async {

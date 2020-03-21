@@ -49,6 +49,30 @@ Router _$ResourceRouter(Resource service) {
             return createResponse<void>(await service.testVoid(), serDe);
           }));
   router.add(
+      'POST',
+      r'/test-body-string-list',
+      (Request request) => sreInterceptor(() async {
+            final serDe = service.serDe;
+            return createResponse<void>(
+                await service.testBodyStringList(
+                    await parseListBodyParam<String>('values', request,
+                        (dynamic val) => serDe.deserialize<String>(val), true)),
+                serDe);
+          }));
+  router.add(
+      'POST',
+      r'/test-body-int-list',
+      (Request request) => sreInterceptor(() async {
+            final serDe = service.serDe;
+            return createResponse<void>(
+                await service.testBodyIntList(await parseListBodyParam<int>(
+                    'values',
+                    request,
+                    (dynamic val) => serDe.deserialize<int>(val),
+                    true)),
+                serDe);
+          }));
+  router.add(
       'GET',
       r'/test',
       (Request request) => sreInterceptor(() async {

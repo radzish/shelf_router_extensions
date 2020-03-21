@@ -52,6 +52,16 @@ class Resource with BuiltValueSerDeProvider {
     print("test void");
   }
 
+  @Route.post('/test-body-string-list')
+  Future<void> testBodyStringList(@Param.body() List<String> values) async {
+    print(values);
+  }
+
+  @Route.post('/test-body-int-list')
+  Future<void> testBodyIntList(@Param.body() List<int> values) async {
+    print(values);
+  }
+
   @Route.get('/test')
   Future<int> test() async {
     return 100500;
