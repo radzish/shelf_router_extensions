@@ -67,6 +67,9 @@ class Resource with BuiltValueSerDeProvider {
     return 100500;
   }
 
+  @Route.get('/test-invalid-enum')
+  Future<void> testInvalidEnum(@Param.query() MediaType type) async {}
+
 //  @Route.post('/test-udpate/<id>')
 //  Future<Response> testPost(
 //      Request request,

@@ -12,9 +12,9 @@ class ParameterParsingError {
   final String value;
   final String cause;
 
-  ParameterParsingError(this.name, this.value, this.cause);
+  ParameterParsingError(this.name, this.value, {this.cause});
 
-  String get message => "parsing parameter '$name'='$value' failed: '$cause'";
+  String get message => "parsing parameter '$name'='$value' failed${cause != null ? ": '$cause'" : ''}";
 }
 
 class ParameterRequiredError {
@@ -111,7 +111,7 @@ T parsePathParam<T>(String name, String value, T Function(String) parser) {
   try {
     return parser(value);
   } on FormatException catch (e) {
-    throw ParameterParsingError(name, value, e.message);
+    throw ParameterParsingError(name, value, cause: e.message);
   }
 }
 
@@ -126,8 +126,18 @@ T parseSingleQueryParam<T>(String name, Request request, T Function(String) pars
   try {
     return queryParameter != null ? parser(queryParameter) : null;
   } catch (e) {
-    throw ParameterParsingError(name, queryParameter, e.message);
+    _handleDynamicParsingError(e, name, queryParameter);
   }
+}
+
+void _handleDynamicParsingError(e, String name, String queryParameter) {
+  var message;
+  try {
+    message = e.message;
+  } catch (e) {
+    // means there is no message property on exception;
+  }
+  throw ParameterParsingError(name, queryParameter, cause: message ?? e.toString());
 }
 
 List<T> parseMultiQueryParam<T>(String name, Request request, T Function(String) parser, bool required) {
@@ -139,11 +149,12 @@ List<T> parseMultiQueryParam<T>(String name, Request request, T Function(String)
   }
 
   return queryParameters?.map(
+    // ignore: missing_return
     (param) {
       try {
         return parser(param);
       } catch (e) {
-        throw ParameterParsingError(name, param, e.message);
+        _handleDynamicParsingError(e, name, param);
       }
     },
   )?.toList();
@@ -154,7 +165,7 @@ Future<List<T>> parseListBodyParam<T>(String name, Request request, T Function(d
   final decodedValues = jsonDecode(value);
 
   if (!(decodedValues is List)) {
-    throw ParameterParsingError(name, value, "value is not List");
+    throw ParameterParsingError(name, value, cause: "value is not List");
   }
 
   if (required && (decodedValues == null || decodedValues.isEmpty)) {
@@ -180,7 +191,7 @@ Future<T> parseSingleBodyParam<T>(String name, Request request, T Function(dynam
   try {
     return decodedValue != null ? parser(decodedValue) : null;
   } on FormatException catch (e) {
-    throw ParameterParsingError(name, value, e.message);
+    throw ParameterParsingError(name, value, cause: e.message);
   }
 }
 
