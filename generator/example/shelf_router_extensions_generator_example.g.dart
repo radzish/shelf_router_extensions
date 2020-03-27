@@ -79,5 +79,15 @@ Router _$ResourceRouter(Resource service) {
             final serDe = service.serDe;
             return createResponse<int>(await service.test(), serDe);
           }));
+  router.add(
+      'GET',
+      r'/test-invalid-enum',
+      (Request request) => sreInterceptor(() async {
+            final serDe = service.serDe;
+            return createResponse<void>(
+                await service.testInvalidEnum(parseSingleQueryParam('type',
+                    request, (val) => decodeData<MediaType>(val, serDe), true)),
+                serDe);
+          }));
   return router;
 }
