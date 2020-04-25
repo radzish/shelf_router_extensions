@@ -100,6 +100,8 @@ Future<Response> sreInterceptor(Future<Response> Function() resourceMethod) asyn
     return Response(HttpStatus.badRequest, body: e.message);
   } on ParameterRequiredError catch (e) {
     return Response(HttpStatus.badRequest, body: e.message);
+  } on Response catch (e) {
+    return e;
   }
 }
 
