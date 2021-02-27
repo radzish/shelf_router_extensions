@@ -11,14 +11,11 @@ abstract class NewsItem<T> implements Built<NewsItem<T>, NewsItemBuilder<T>> {
 
   static Serializer<NewsItem> get serializer => _$newsItemSerializer;
 
-  @nullable
-  int get id;
+  int? get id;
 
-  @nullable
-  String get title;
+  String? get title;
 
-  @nullable
-  T get category;
+  T? get category;
 }
 
 abstract class Generic implements Built<Generic, GenericBuilder> {
@@ -28,8 +25,7 @@ abstract class Generic implements Built<Generic, GenericBuilder> {
 
   static Serializer<Generic> get serializer => _$genericSerializer;
 
-  @nullable
-  String get value;
+  String? get value;
 }
 
 class MediaType extends EnumClass {
