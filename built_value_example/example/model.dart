@@ -7,7 +7,7 @@ part 'model.g.dart';
 abstract class NewsItem<T> implements Built<NewsItem<T>, NewsItemBuilder<T>> {
   NewsItem._();
 
-  factory NewsItem([void Function(NewsItemBuilder<T>) updates]) = _$NewsItem<T>;
+  factory NewsItem([void Function(NewsItemBuilder<T>)? updates]) = _$NewsItem<T>;
 
   static Serializer<NewsItem> get serializer => _$newsItemSerializer;
 
@@ -21,7 +21,7 @@ abstract class NewsItem<T> implements Built<NewsItem<T>, NewsItemBuilder<T>> {
 abstract class Generic implements Built<Generic, GenericBuilder> {
   Generic._();
 
-  factory Generic([void Function(GenericBuilder) updates]) = _$Generic;
+  factory Generic([void Function(GenericBuilder)? updates]) = _$Generic;
 
   static Serializer<Generic> get serializer => _$genericSerializer;
 

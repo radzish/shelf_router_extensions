@@ -109,19 +109,25 @@ class BuiltValueSerDe extends StandardSerDe {
 
   T deserialize<T>(dynamic data) {
     if (isType<T, NewsItem<Generic>>()) {
-      return serializers.deserialize(data, specifiedType: FullType(NewsItem, [FullType(Generic)])) as T;
+      return serializers.deserialize(data as Object, specifiedType: FullType(NewsItem, [FullType(Generic)])) as T;
     }
 
     if (isType<T, NewsItem<String>>()) {
-      return serializers.deserialize(data, specifiedType: FullType(NewsItem, [FullType(String)])) as T;
+      return serializers.deserialize(data as Object, specifiedType: FullType(NewsItem, [FullType(String)])) as T;
     }
 
     if (T == MediaType) {
-      return serializers.deserialize(data, specifiedType: FullType(MediaType)) as T;
+      return serializers.deserialize(data as Object, specifiedType: FullType(MediaType)) as T;
     }
 
     return super.deserialize<T>(data);
   }
+
+  @Route.get('/response')
+  Future<Response> testResponse() async {
+    return Response.ok(null);
+  }
+
 }
 
 void main() async {

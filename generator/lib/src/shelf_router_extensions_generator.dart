@@ -121,7 +121,7 @@ code.Code _buildAddHandlerCode({
                     ..body = code.Block((b) => b
                       ..addExpression(_createSerDe(classElement))
                       ..addExpression(
-                        code.refer("createResponse<${resolveReturnType(handler)}>").call([
+                        code.refer("createResponse<${resolveReturnType(handler).getDisplayString(withNullability: false)}>").call([
                           service.property(handler.element.name).call(_buildParameters(handler)).awaited,
                           code.refer("serDe"),
                         ]).returned,
