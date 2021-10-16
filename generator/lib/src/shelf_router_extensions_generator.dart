@@ -1,28 +1,14 @@
-// Copyright 2019 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import 'dart:async' show Future;
 
 import 'package:analyzer/dart/element/element.dart' show ClassElement, ElementKind, ExecutableElement;
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/nullability_suffix.dart';
 import 'package:analyzer/dart/element/type.dart' show DartType, InterfaceType, ParameterizedType;
 import 'package:build/build.dart' show BuildStep, log;
 import 'package:built_collection/built_collection.dart';
 import 'package:code_builder/code_builder.dart' as code;
 import 'package:code_builder/code_builder.dart';
 import 'package:http_methods/http_methods.dart' show isHttpMethod;
-import 'package:meta/meta.dart';
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:shelf_router/shelf_router.dart' as shelf_router;
 import 'package:shelf_router/src/router_entry.dart' show RouterEntry;
@@ -34,6 +20,7 @@ import 'package:source_gen/source_gen.dart' as g;
 final _paramChecker = g.TypeChecker.fromRuntime(Param);
 final _listTypeChecker = g.TypeChecker.fromRuntime(List);
 final _serDeProviderChecker = g.TypeChecker.fromRuntime(SerDeProvider);
+final _nullTypeChecker = g.TypeChecker.fromRuntime(Null);
 
 final RegExp _routeParser = RegExp(r'([^<]*)(?:<([^>|]+)(?:\|([^>]*))?>)?');
 
@@ -45,7 +32,7 @@ final _requestTypeChecker = g.TypeChecker.fromRuntime(shelf.Request);
 
 /// A representation of a handler that was annotated with [Route].
 class _Handler {
-  final String verb, route;
+  final String? verb, route;
   final ExecutableElement element;
 
   _Handler(this.verb, this.route, this.element);
@@ -62,8 +49,8 @@ List<ExecutableElement> getAnnotatedElementsOrderBySourceOffset(ClassElement cls
 /// Generate a `_$<className>Router(<className> service)` method that returns a
 /// [shelf_router.Router] configured based on annotated handlers.
 code.Method _buildRouterMethod({
-  @required ClassElement classElement,
-  @required List<_Handler> handlers,
+  required ClassElement classElement,
+  required List<_Handler> handlers,
 }) =>
     code.Method(
       (b) => b
@@ -89,44 +76,47 @@ code.Method _buildRouterMethod({
 
 /// Generate the code statement that adds [handler] from [service] to [router].
 code.Code _buildAddHandlerCode({
-  @required ClassElement classElement,
-  @required code.Reference router,
-  @required code.Reference service,
-  @required _Handler handler,
+  required ClassElement classElement,
+  required code.Reference router,
+  required code.Reference service,
+  required _Handler handler,
 }) {
   switch (handler.verb) {
     case r'$mount':
       return router.property('mount').call([
-        code.literalString(handler.route, raw: true),
+        code.literalString(handler.route!, raw: true),
         service.property(handler.element.name),
       ]).statement;
     case r'$all':
       return router.property('all').call([
-        code.literalString(handler.route, raw: true),
+        code.literalString(handler.route!, raw: true),
         service.property(handler.element.name),
       ]).statement;
     default:
-      final pathParamNames = _resolvePathParamNames(handler.route);
+      final pathParamNames = _resolvePathParamNames(handler.route!);
       return router.property('add').call([
-        code.literalString(handler.verb.toUpperCase()),
-        code.literalString(handler.route, raw: true),
+        code.literalString(handler.verb!.toUpperCase()),
+        code.literalString(handler.route!, raw: true),
         Method(
           (b) => b
             ..requiredParameters.addAll(_handlerParameterNames(pathParamNames))
             ..body = code.refer('sreInterceptor').call([
               Method(
-                (b) {
-                  return b
-                    ..modifier = code.MethodModifier.async
-                    ..body = code.Block((b) => b
+                (b1) => b1
+                  ..modifier = code.MethodModifier.async
+                  ..body = code.Block(
+                    (b2) => b2
                       ..addExpression(_createSerDe(classElement))
                       ..addExpression(
-                        code.refer("createResponse<${resolveReturnType(handler).getDisplayString(withNullability: false)}>").call([
+                        code
+                            .refer(
+                                "createResponse<${resolveReturnType(handler).getDisplayString(withNullability: true)}>")
+                            .call([
                           service.property(handler.element.name).call(_buildParameters(handler)).awaited,
                           code.refer("serDe"),
                         ]).returned,
-                      ));
-                },
+                      ),
+                  ),
               ).closure
             ]).code,
         ).closure
@@ -197,9 +187,9 @@ code.Expression _convertParameter(ParameterElement param) {
 
   final constructorName = (paramMeta.element as ConstructorElement).name;
 
-  final constructorConstant = param.metadata.first.computeConstantValue();
-  final required = constructorConstant.getField("required").toBoolValue();
-  final name = constructorConstant.getField("name").toStringValue();
+  final constructorConstant = param.metadata.first.computeConstantValue()!;
+  final required = !isNullable(param.type);
+  final name = constructorConstant.getField("name")!.toStringValue();
 
   switch (constructorName) {
     case "path":
@@ -213,33 +203,56 @@ code.Expression _convertParameter(ParameterElement param) {
   }
 }
 
-code.Expression _buildPathParam(String name, String paramName, bool required, DartType type) {
+bool isNullable(DartType type) {
+  return type.nullabilitySuffix == NullabilitySuffix.question;
+}
+
+code.Expression _buildPathParam(String? name, String paramName, bool required, DartType type) {
+  var parseMethodCall = code.Method((b) => b
+    ..requiredParameters = ListBuilder(<Parameter>[code.Parameter((b) => b..name = "val")])
+    ..body = code.refer("decodeData<${type.name}>").call([code.refer("val"), code.refer("serDe")]).code).closure;
+
+  if (required) {
+    parseMethodCall = parseMethodCall.nullChecked;
+  }
+
   return code.refer("parsePathParam").call([
     code.literalString(name ?? paramName),
     code.refer(name ?? paramName),
-    code.Method((b) => b
-      ..requiredParameters = ListBuilder(<Parameter>[code.Parameter((b) => b..name = "val")])
-      ..body = code.refer("decodeData<${type.name}>").call([code.refer("val"), code.refer("serDe")]).code).closure,
+    parseMethodCall,
   ]);
 }
 
-code.Expression _buildQueryParam(String name, String paramName, bool required, DartType type) {
+code.Expression _buildQueryParam(String? name, String paramName, bool required, DartType type) {
   final isList = _listTypeChecker.isAssignableFromType(type);
   final listGenerics = (type as InterfaceType).typeArguments;
   final resolvedType = isList ? listGenerics.first : type;
 
-  return code.refer(isList ? "parseMultiQueryParam" : "parseSingleQueryParam").call([
+  var parseMethodCall = code.Method((b) => b
+        ..requiredParameters = ListBuilder(<Parameter>[
+          code.Parameter((b) => b
+            ..type = code.refer("dynamic")
+            ..name = "val")
+        ])
+        ..body = code.refer("decodeData<${resolvedType.name}>").call([code.refer("val"), code.refer("serDe")]).code)
+      .closure;
+
+  if (required) {
+    parseMethodCall = parseMethodCall.nullChecked;
+  }
+
+  return code
+      .refer(isList
+          ? (required ? "parseRequiredMultiQueryParam" : "parseOptionalMultiQueryParam")
+          : (required ? "parseRequiredSingleQueryParam" : "parseOptionalSingleQueryParam"))
+      .call([
     code.literalString(name ?? paramName),
     code.refer("request"),
-    code.Method((b) => b
-          ..requiredParameters = ListBuilder(<Parameter>[code.Parameter((b) => b..name = "val")])
-          ..body = code.refer("decodeData<${resolvedType.name}>").call([code.refer("val"), code.refer("serDe")]).code)
-        .closure,
-    code.literalBool(required),
+    parseMethodCall,
   ]);
 }
 
-code.Expression _buildBodyParam(String name, String paramName, bool required, DartType type) {
+code.Expression _buildBodyParam(String? name, String paramName, bool required, DartType type) {
   final isList = _listTypeChecker.isAssignableFromType(type);
   DartType resolvedType = type;
   if (isList) {
@@ -249,19 +262,28 @@ code.Expression _buildBodyParam(String name, String paramName, bool required, Da
 
   return code
       .refer(isList
-          ? "parseListBodyParam<${resolvedType.displayName}>"
-          : "parseSingleBodyParam<${resolvedType.displayName}>")
+          ? required
+              ? "parseRequiredListBodyParam<${resolvedType.displayName}>"
+              : "parseOptionalListBodyParam<${resolvedType.displayName}?>"
+          : required
+              ? "parseRequiredSingleBodyParam<${resolvedType.displayName}>"
+              : "parseOptionalSingleBodyParam<${resolvedType.displayName}?>")
       .call([
     code.literalString(name ?? paramName),
     code.refer("request"),
-    code.Method((b) => b
-      ..requiredParameters = ListBuilder(<Parameter>[
-        code.Parameter((b) => b
-          ..type = code.TypeReference((b) => b..symbol = "dynamic")
-          ..name = "val")
-      ])
-      ..body = code.refer("serDe.deserialize<${resolvedType.displayName}>").call([code.refer("val")]).code).closure,
-    code.literalBool(required),
+    code.Method((b) {
+      var bodyCall = code.refer("serDe.deserialize<${resolvedType.displayName}>").call([code.refer("val")]);
+      if (required) {
+        bodyCall = bodyCall.nullChecked;
+      }
+      b
+        ..requiredParameters = ListBuilder(<Parameter>[
+          code.Parameter((b) => b
+            ..type = code.TypeReference((b) => b..symbol = "dynamic")
+            ..name = "val")
+        ])
+        ..body = bodyCall.code;
+    }).closure,
   ]).awaited;
 }
 
@@ -271,7 +293,7 @@ bool _isRequestParam(ParameterElement param) {
 
 class ShelfRouterExtensionsGenerator extends g.Generator {
   @override
-  Future<String> generate(g.LibraryReader library, BuildStep step) async {
+  Future<String?> generate(g.LibraryReader library, BuildStep step) async {
     // Create a map from ClassElement to list of annotated elements sorted by
     // offset in source code, this is not type checked yet.
     final classes = <ClassElement, List<_Handler>>{};
@@ -284,8 +306,8 @@ class ShelfRouterExtensionsGenerator extends g.Generator {
 
       classes[cls] = elements
           .map((e) => _routeType.annotationsOfExact(e).map((a) => _Handler(
-                a.getField('verb').toStringValue(),
-                a.getField('route').toStringValue(),
+                a.getField('verb')!.toStringValue(),
+                a.getField('route')!.toStringValue(),
                 e,
               )))
           .expand((i) => i)
@@ -324,7 +346,7 @@ void _typeCheckHandler(_Handler h) {
   }
 
   // Check the verb, note that $all is a special value for handling all verbs.
-  if (!isHttpMethod(h.verb) && h.verb != r'$all') {
+  if (!isHttpMethod(h.verb!) && h.verb != r'$all') {
     throw g.InvalidGenerationSourceError(
         'The verb "${h.verb}" used in shelf_router.Route annotation must be '
         'a valid HTTP method',
@@ -350,7 +372,7 @@ void _typeCheckHandler(_Handler h) {
   // Check the route can parse
   List<String> params;
   try {
-    params = RouterEntry(h.verb, h.route, () => null).params;
+    params = RouterEntry(h.verb!, h.route!, () => null).params;
   } on ArgumentError catch (e) {
     throw g.InvalidGenerationSourceError(
       e.toString(),
@@ -446,13 +468,13 @@ void _typeCheckMount(_Handler h) {
   }
 
   // Sanity checks for the prefix
-  if (!h.route.startsWith('/') || !h.route.endsWith('/')) {
+  if (!h.route!.startsWith('/') || !h.route!.endsWith('/')) {
     throw g.InvalidGenerationSourceError(
         'The prefix "${h.route}" in shelf_router.Route.mount(prefix) '
         'annotation must begin and end with a slash',
         element: h.element);
   }
-  if (h.route.contains('<')) {
+  if (h.route!.contains('<')) {
     throw g.InvalidGenerationSourceError(
         'The prefix "${h.route}" in shelf_router.Route.mount(prefix) '
         'annotation cannot contain <',

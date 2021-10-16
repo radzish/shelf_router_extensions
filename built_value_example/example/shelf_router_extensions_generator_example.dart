@@ -18,13 +18,13 @@ class Resource with BuiltValueSerDeProvider {
     @Param.path() String sParam,
     @Param.query(name: 'query') String qsParam,
     @Param.query(name: 'reqnum') int reqQiParam,
-    @Param.query(name: 'num', required: false) int qiParam,
+    @Param.query(name: 'num') int? qiParam,
     @Param.query() int noname,
     @Param.query() List<int> multiple,
-    @Param.query() List<String> multipleStrings,
+    @Param.query() List<String>? multipleStrings,
 //    @Param.body(required: false) List<String> bodyParam,
 //    @Param.body(required: false) String bodyParam,
-    @Param.body(required: false) NewsItem<Generic> bodyParam,
+    @Param.body() NewsItem<Generic>? bodyParam,
 //  @Param.body(required: false) int bodyParam,
   ) async {
     print(
@@ -70,6 +70,9 @@ class Resource with BuiltValueSerDeProvider {
   @Route.get('/test-invalid-enum')
   Future<void> testInvalidEnum(@Param.query() MediaType type) async {}
 
+  @Route.get('/test-invalid-enum')
+  Future<String?> testNullableReturn() async {}
+
 //  @Route.post('/test-udpate/<id>')
 //  Future<Response> testPost(
 //      Request request,
@@ -85,7 +88,7 @@ class Resource with BuiltValueSerDeProvider {
 //    return Response.ok('hi $sParam $iParam $qsParam $reqQiParam $qiParam $noname $multiple $multipleStrings');
 //  }
 
-  Handler get handler => _$ResourceRouter(this).handler;
+  Handler get handler => _$ResourceRouter(this);
 }
 
 mixin BuiltValueSerDeProvider implements SerDeProvider {
@@ -93,7 +96,7 @@ mixin BuiltValueSerDeProvider implements SerDeProvider {
 }
 
 class BuiltValueSerDe extends StandardSerDe {
-  dynamic serialize<T>(T item) {
+  dynamic serialize<T>(T? item) {
     if (item is NewsItem<Generic>) {
       return serializers.serialize(item, specifiedType: FullType(NewsItem, [FullType(Generic)]));
     }
@@ -107,7 +110,7 @@ class BuiltValueSerDe extends StandardSerDe {
     return super.serialize<T>(item);
   }
 
-  T deserialize<T>(dynamic data) {
+  T? deserialize<T>(dynamic data) {
     if (isType<T, NewsItem<Generic>>()) {
       return serializers.deserialize(data as Object, specifiedType: FullType(NewsItem, [FullType(Generic)])) as T;
     }
