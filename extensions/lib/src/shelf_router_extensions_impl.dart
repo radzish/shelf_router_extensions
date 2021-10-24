@@ -9,8 +9,8 @@ class ShelfExtendedResource {
 
 class ParameterParsingError {
   final String name;
-  final String value;
-  final String cause;
+  final String? value;
+  final String? cause;
 
   ParameterParsingError(this.name, this.value, {this.cause});
 
@@ -30,27 +30,26 @@ abstract class SerDeProvider {
 }
 
 class Param {
-  final String name;
-  final bool required;
+  final String? name;
 
-  const Param._({this.name, this.required});
+  const Param._({this.name});
 
-  const Param.path({String name}) : this._(name: name, required: true);
+  const Param.path({String? name}) : this._(name: name);
 
-  const Param.query({String name, bool required = true}) : this._(name: name, required: required);
+  const Param.query({String? name}) : this._(name: name);
 
-  const Param.body({bool required = true}) : this._(required: required);
+  const Param.body() : this._();
 }
 
 abstract class SerDe {
-  dynamic serialize<T>(T value);
+  dynamic serialize<T>(T? value);
 
-  T deserialize<T>(dynamic data);
+  T? deserialize<T>(dynamic data);
 }
 
 class StandardSerDe implements SerDe {
   @override
-  dynamic serialize<T>(T value) {
+  dynamic serialize<T>(T? value) {
     if (value == null || value is num || value is String || value is bool) {
       return value;
     }
@@ -59,7 +58,7 @@ class StandardSerDe implements SerDe {
   }
 
   @override
-  T deserialize<T>(dynamic item) {
+  T? deserialize<T>(dynamic item) {
     if (item == null) {
       return null;
     }
@@ -106,10 +105,6 @@ Future<Response> sreInterceptor(Future<Response> Function() resourceMethod) asyn
 }
 
 T parsePathParam<T>(String name, String value, T Function(String) parser) {
-  if (value == null) {
-    return null;
-  }
-
   try {
     return parser(value);
   } on FormatException catch (e) {
@@ -117,22 +112,29 @@ T parsePathParam<T>(String name, String value, T Function(String) parser) {
   }
 }
 
-T parseSingleQueryParam<T>(String name, Request request, T Function(String) parser, bool required) {
+T? parseOptionalSingleQueryParam<T>(String name, Request request, T? Function(dynamic) parser) {
   final uri = request.requestedUri;
   final queryParameter = uri.queryParameters[name];
 
-  if (required && queryParameter == null) {
+  if (queryParameter == null) {
+    return null;
+  }
+
+  return parseRequiredSingleQueryParam(name, request, parser);
+}
+
+T parseRequiredSingleQueryParam<T>(String name, Request request, T Function(dynamic) parser) {
+  final uri = request.requestedUri;
+  final queryParameter = uri.queryParameters[name];
+
+  if (queryParameter == null) {
     throw ParameterRequiredError(name);
   }
 
-  try {
-    return queryParameter != null ? parser(queryParameter) : null;
-  } catch (e) {
-    _handleDynamicParsingError(e, name, queryParameter);
-  }
+  return _doParseValue(name, queryParameter, parser);
 }
 
-void _handleDynamicParsingError(e, String name, String queryParameter) {
+void _handleDynamicParsingError(e, String name, String? queryParameter) {
   var message;
   try {
     message = e.message;
@@ -142,27 +144,37 @@ void _handleDynamicParsingError(e, String name, String queryParameter) {
   throw ParameterParsingError(name, queryParameter, cause: message ?? e.toString());
 }
 
-List<T> parseMultiQueryParam<T>(String name, Request request, T Function(String) parser, bool required) {
+List<T>? parseOptionalMultiQueryParam<T>(String name, Request request, T? Function(String) parser) {
   final uri = request.requestedUri;
   final queryParameters = uri.queryParametersAll[name];
 
-  if (required && queryParameters == null) {
+  if (queryParameters == null) {
+    return null;
+  }
+
+  return parseRequiredMultiQueryParam(name, request, (val) => parser(val)!);
+}
+
+List<T> parseRequiredMultiQueryParam<T>(String name, Request request, T Function(dynamic) parser) {
+  final uri = request.requestedUri;
+  final queryParameters = uri.queryParametersAll[name];
+
+  if (queryParameters == null || queryParameters.isEmpty) {
     throw ParameterRequiredError(name);
   }
 
-  return queryParameters?.map(
-    // ignore: missing_return
-    (param) {
-      try {
-        return parser(param);
-      } catch (e) {
-        _handleDynamicParsingError(e, name, param);
-      }
-    },
-  )?.toList();
+  return queryParameters.map((param) => _doParseValue<T>(name, param, parser)!).toList();
 }
 
-Future<List<T>> parseListBodyParam<T>(String name, Request request, T Function(dynamic) parser, bool required) async {
+T? _doParseValue<T>(String name, dynamic param, Function(dynamic) parser) {
+  try {
+    return parser(param);
+  } catch (e) {
+    _handleDynamicParsingError(e, name, param);
+  }
+}
+
+Future<List<T>?> parseOptionalListBodyParam<T>(String name, Request request, T? Function(dynamic) parser) async {
   final value = await request.readAsString();
   final decodedValues = jsonDecode(value);
 
@@ -170,28 +182,55 @@ Future<List<T>> parseListBodyParam<T>(String name, Request request, T Function(d
     throw ParameterParsingError(name, value, cause: "value is not List");
   }
 
-  if (required && (decodedValues == null || decodedValues.isEmpty)) {
-    throw ParameterRequiredError(name);
+  if (decodedValues.isEmpty) {
+    return null;
   }
 
-  return decodedValues?.map(parser)?.cast<T>()?.toList();
+  return parseRequiredListBodyParam(name, request, (val) => parser(val)!);
 }
 
-Future<T> parseSingleBodyParam<T>(String name, Request request, T Function(dynamic) parser, bool required) async {
+Future<List<T>> parseRequiredListBodyParam<T>(String name, Request request, T Function(dynamic) parser) async {
   final value = await request.readAsString();
+  final decodedValues = jsonDecode(value) as List;
 
-  if (required && (value == null || value.isEmpty)) {
+  if (decodedValues.isEmpty) {
     throw ParameterRequiredError(name);
   }
 
-  if (value == null || value.isEmpty) {
+  if (!(decodedValues is List)) {
+    throw ParameterParsingError(name, value, cause: "value is not List");
+  }
+
+  return decodedValues.map(parser).cast<T>().toList();
+}
+
+Future<T?> parseOptionalSingleBodyParam<T>(String name, Request request, T? Function(dynamic) parser) async {
+  final value = await request.readAsString();
+
+  if (value.isEmpty) {
     return null;
   }
 
   final decodedValue = _decodeJson(value);
 
   try {
-    return decodedValue != null ? parser(decodedValue) : null;
+    return _doParseValue(name, decodedValue, parser);
+  } on FormatException catch (e) {
+    throw ParameterParsingError(name, value, cause: e.message);
+  }
+}
+
+Future<T> parseRequiredSingleBodyParam<T>(String name, Request request, T Function(dynamic) parser) async {
+  final value = await request.readAsString();
+
+  if (value.isEmpty) {
+    throw ParameterRequiredError(name);
+  }
+
+  final decodedValue = _decodeJson(value);
+
+  try {
+    return _doParseValue(name, decodedValue, parser);
   } on FormatException catch (e) {
     throw ParameterParsingError(name, value, cause: e.message);
   }
@@ -223,9 +262,9 @@ String encodeData<T>(T data, SerDe serDe) {
   return jsonEncode(result);
 }
 
-T decodeData<T>(String data, SerDe serDe) {
+T? decodeData<T>(dynamic data, SerDe serDe) {
   final json = _decodeJson(data);
-  return serDe.deserialize(json);
+  return serDe.deserialize<T>(json);
 }
 
 dynamic _decodeJson(String data) {
